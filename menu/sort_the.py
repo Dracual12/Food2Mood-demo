@@ -73,29 +73,54 @@ def read_table(user, category: str, mood: str, style: str, rec: str,
         mood_info = item[rec_item].split(', ')
 
         min_order = float('inf')
+        base_order_found = False
         for info in mood_info:
             match = re.match(r'(\w+)\s*=\s*(\d+)', info)
             if match:
                 mood_name, mood_order = match.groups()
                 if mood_name.strip() == mood:
                     min_order = min(min_order, int(mood_order))
+                    base_order_found = True
 
-        # Учитываем рейтинг пользователя
+        # Учитываем рейтинг пользователя с корректировкой позиций
         dish_id = str(item[0])
+        dish_name = str(item[2])
+        debug_base_order = min_order if base_order_found else 'inf'
+        debug_user_rating = None
+        debug_rating_count = None
+        debug_position_correction = 0
+        
         if dish_id in user_ratings:
-            # Если у блюда есть рейтинг пользователя, корректируем порядок
-            # Чем выше рейтинг, тем ниже порядок (ближе к началу списка)
             rating_data = user_ratings[dish_id]
             if isinstance(rating_data, dict):
                 user_rating = rating_data['rating']
                 rating_count = rating_data['count']
-                # Учитываем как рейтинг, так и количество оценок
-                # Чем больше оценок, тем сильнее влияние рейтинга
-                min_order = min_order - (user_rating * 10 * (1 + rating_count / 10))
+                debug_user_rating = user_rating
+                debug_rating_count = rating_count
             else:
-                # Для обратной совместимости со старым форматом
                 user_rating = float(rating_data)
-                min_order = min_order - (user_rating * 10)
+                debug_user_rating = user_rating
+                debug_rating_count = 1
+            
+            # Применяем корректировки позиций по рейтингу
+            if user_rating == 5:  # Поднимаем на 2 позиции вверх
+                debug_position_correction = -3
+            elif user_rating == 4:  # Поднимаем на 1 позицию вверх
+                debug_position_correction = -2
+            elif user_rating == 3:  # Остается на месте
+                debug_position_correction = 1
+            elif user_rating == 2:  # Опускаем на 1 позицию вниз
+                debug_position_correction = 2
+            elif user_rating == 1:  # Опускаем на 2 позиции вниз
+                debug_position_correction = 3
+            
+            # Добавляем корректировку к базовому порядку
+            min_order = min_order + debug_position_correction
+
+        try:
+            print(f"[SORT_DEBUG] mood={mood} rec={rec} rec_item={rec_item} id={dish_id} name={dish_name} base={debug_base_order} user_rating={debug_user_rating} count={debug_rating_count} pos_correction={debug_position_correction} result={min_order}")
+        except Exception:
+            pass
 
         return min_order
 
@@ -113,6 +138,22 @@ def read_table(user, category: str, mood: str, style: str, rec: str,
     # Добавляем вторичный ключ сортировки для стабильного порядка
     # Используем название блюда как третий ключ для гарантии стабильного порядка
     df_new = sorted(df2, key=lambda x: (sort_by(x), x[0], x[2]))  # x[2] - название блюда
+
+    # Диагностика: показываем первые 10 элементов после сортировки с их ключами
+    try:
+        preview = []
+        for item in df_new[:10]:
+            try:
+                preview.append({
+                    'id': item[0],
+                    'name': item[2],
+                    'sort_key': sort_by(item)
+                })
+            except Exception:
+                continue
+        print(f"[SORT_DEBUG] TOP_AFTER_SORT (first 10): {preview}")
+    except Exception:
+        pass
     dishes = []
     dishes_white = []
     try:
@@ -176,14 +217,136 @@ def read_table(user, category: str, mood: str, style: str, rec: str,
         else:
             dishes.append(dish_data)
 
-    # Формируем итоговый список: сначала dishes_white, потом dishes без дублей
-    all_dishes = dishes_white + [d for d in dishes if d["Название"] not in [w["Название"] for w in dishes_white]]
+    # Формируем итоговый список с сохранением порядка сортировки
+    # Сначала добавляем все блюда в правильном порядке сортировки
+    all_dishes = []
+    print(f"[SORT_DEBUG] Processing df_new with {len(df_new)} dishes")
+    for i, dish in enumerate(df_new):
+        dish_name = dish[2]
+        print(f"[SORT_DEBUG] Processing dish {i}: {dish_name}")
+        
+        dish_ingredients = [ingredient.strip() for ingredient in str(dish[5]).lower().split(',')]
+        if set(blacklist) & set(dish_ingredients):
+            print(f"[SORT_DEBUG] Skipping {dish_name} - blacklisted ingredients")
+            continue
+        if dish[2] == first_dish_name or dish[2] in stop_list:
+            print(f"[SORT_DEBUG] Skipping {dish_name} - first_dish or stop_list")
+            continue
+        
+        # Ищем это блюдо в dishes_white или dishes
+        found_dish = None
+        
+        # Сначала проверяем dishes_white
+        for w_dish in dishes_white:
+            if w_dish["Название"] == dish_name:
+                found_dish = w_dish
+                print(f"[SORT_DEBUG] Found {dish_name} in dishes_white")
+                break
+        
+        # Если не найдено в white, ищем в обычных dishes
+        if not found_dish:
+            for d_dish in dishes:
+                if d_dish["Название"] == dish_name:
+                    found_dish = d_dish
+                    print(f"[SORT_DEBUG] Found {dish_name} in dishes")
+                    break
+        
+        if found_dish:
+            all_dishes.append(found_dish)
+            print(f"[SORT_DEBUG] Added {dish_name} to all_dishes")
+        else:
+            print(f"[SORT_DEBUG] NOT FOUND {dish_name} in dishes_white or dishes!")
+    
+    # Добавляем first_dish в начало, если он есть и у него нет негативного рейтинга
+    if first_dish_name:
+        print(f"[SORT_DEBUG] FIRST_DISH_NAME: {first_dish_name}")
+        first_dish_data = None
+        for w_dish in dishes_white:
+            if w_dish["Название"] == first_dish_name:
+                first_dish_data = w_dish
+                break
+        
+        if first_dish_data:
+            # Проверяем рейтинг first_dish из user_ratings
+            should_insert_at_beginning = True
+            # Получаем ID блюда по названию
+            try:
+                first_dish_id = str(db.restaurants_get_dish(first_dish_name)[0])
+            except:
+                first_dish_id = ""
+            
+            if first_dish_id in user_ratings:
+                rating_data = user_ratings[first_dish_id]
+                if isinstance(rating_data, dict):
+                    rating = rating_data['rating']
+                else:
+                    rating = float(rating_data)
+                
+                if rating <= 2:  # Если рейтинг 1 или 2, не вставляем в начало
+                    should_insert_at_beginning = False
+                    print(f"[SORT_DEBUG] FIRST_DISH has negative rating {rating}, keeping in sorted order")
+            
+            if should_insert_at_beginning:
+                print(f"[SORT_DEBUG] INSERTING FIRST_DISH at position 0: {first_dish_data['Название']}")
+                all_dishes.insert(0, first_dish_data)
+            else:
+                print(f"[SORT_DEBUG] FIRST_DISH already in sorted position: {first_dish_data['Название']}")
+                # Убеждаемся, что first_dish есть в списке (он должен быть добавлен в основном цикле)
+                dish_found_in_list = False
+                for dish in all_dishes:
+                    if dish["Название"] == first_dish_name:
+                        dish_found_in_list = True
+                        break
+                
+                if not dish_found_in_list:
+                    print(f"[SORT_DEBUG] FIRST_DISH not found in list, finding correct position")
+                    # Находим правильную позицию для first_dish согласно сортировке
+                    first_dish_key = None
+                    for dish in df_new:
+                        if dish[2] == first_dish_name:
+                            first_dish_key = sort_by(dish)
+                            break
+                    
+                    if first_dish_key is not None:
+                        # Вставляем в правильную позицию согласно ключу сортировки
+                        insert_position = 0
+                        for i, dish in enumerate(all_dishes):
+                            dish_name = dish["Название"]
+                            # Находим соответствующий элемент в df_new для получения ключа
+                            for df_dish in df_new:
+                                if df_dish[2] == dish_name:
+                                    dish_key = sort_by(df_dish)
+                                    if dish_key > first_dish_key:
+                                        insert_position = i
+                                        break
+                                    break
+                            if insert_position > 0:
+                                break
+                        
+                        print(f"[SORT_DEBUG] Inserting FIRST_DISH at position {insert_position}")
+                        all_dishes.insert(insert_position, first_dish_data)
+                    else:
+                        print(f"[SORT_DEBUG] Could not find sort key for FIRST_DISH, adding to end")
+                        all_dishes.append(first_dish_data)
 
     # Возвращаем результат
     if len(all_dishes) > 0:
+        try:
+            ordered_names = [d["Название"] for d in all_dishes[:20]]
+            print(f"[SORT_DEBUG] ORDERED_NAMES (first 20): {ordered_names}")
+        except Exception:
+            pass
         if len(all_dishes) > numb:
+            try:
+                print(f"[SORT_DEBUG] SELECTED: numb={numb} name={all_dishes[numb]['Название']} len={len(all_dishes)} remaining={len(all_dishes) - numb - 1}")
+            except Exception:
+                pass
             return all_dishes[numb], len(all_dishes), len(all_dishes) - numb - 1
         else:
+            try:
+                print(f"[SORT_DEBUG] SELECTED: numb={numb} clamped_to_last name={all_dishes[-1]['Название']} len={len(all_dishes)} remaining=0")
+            except Exception:
+                pass
             return all_dishes[-1], len(all_dishes), 0
     else:
         return None, None, None
@@ -309,7 +472,7 @@ def generate_recommendation(user):
             continue
 
         # Проверяем ингредиенты
-        dish_ingredients = [ingredient.strip() for ingredient in str(dish[5]).lower().split(',')]
+        dish_ingredients = [ingredient.strip() for ingredient in str(dish[4]).lower().split(',')]
         if set(blacklist) & set(dish_ingredients):
             continue
 

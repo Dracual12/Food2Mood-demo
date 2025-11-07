@@ -62,7 +62,7 @@ async def category_menu(call: types.CallbackQuery):
         size_list = dish['Размер']
         if size_list:
             size_list = eval(size_list)
-        photo_dir = '/Users/artemijpetrov/PycharmProjects/koreanchickdouble/chick'
+        photo_dir = '/Users/temurkarimov/PycharmProjects/koreanchick/chick'
 
         all_files = {os.path.splitext(file)[0]: os.path.join(photo_dir, file) for file in os.listdir(photo_dir)}
         shemodi_dish_photo = False
@@ -155,6 +155,7 @@ def create_buttons_to_menu(user):
 
 def buttons_food_05(dish_id: int, dish: int, length: int, last: int, in_basket: bool = None, qr_scanned: bool = None, quantity: int = 0, size_list: list = None, user: int = 0):
     menu = InlineKeyboardMarkup(row_width=3)
+    qr_scanned = True
     if dish is not None:
         if length != 1:
             if dish > 0:

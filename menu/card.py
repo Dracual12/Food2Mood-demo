@@ -59,7 +59,7 @@ async def send_dish(call: types.CallbackQuery):
         else:
             in_basket = False
             quantity = 0
-        photo_dir = '/Users/artemijpetrov/PycharmProjects/koreanchickdouble/chick'
+        photo_dir = '/Users/temurkarimov/PycharmProjects/koreanchick/chick'
         all_files = {os.path.splitext(file)[0]: os.path.join(photo_dir, file) for file in os.listdir(photo_dir)}
         message_obj = None
         last_message = foods_photo_for_category_message_id

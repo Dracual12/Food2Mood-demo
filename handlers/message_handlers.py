@@ -214,7 +214,7 @@ async def return_to_dishes(call: types.CallbackQuery):
     dish, length, numb = sort_the.get_dish(user)
     dish_id = db.get_temp_users_dish_id(user)
     size_list = dish['Размер']
-    photo_dir = '/Users/artemijpetrov/PycharmProjects/koreanchickdouble/chick'
+    photo_dir = '/Users/temurkarimov/PycharmProjects/koreanchick/chick'
 
     all_files = {os.path.splitext(file)[0]: os.path.join(photo_dir, file) for file in os.listdir(photo_dir)}
     shemodi_dish_photo = False
@@ -355,6 +355,12 @@ async def review_star(call: types.CallbackQuery):
     # Сохраняем оценку в таблицу correlation_coefficients
     db.save_dish_rating(user, dish_id, int(data[-2]))
 
+    # Сбрасываем индекс текущего блюда, чтобы после оценки показ начинался с начала отсортированного списка
+    try:
+        db.set_client_temp_dish(user, 0)
+    except Exception as e:
+        print("reset numb error", e)
+
     await dp.storage.set_data(user=user, data={
         'rating': rating,
         'dish_name': dish[2],
@@ -391,6 +397,7 @@ def buttons_05():
 
 def buttons_food_05(dish_id: int, dish: int, length: int, last: int, in_basket: bool = None, qr_scanned: bool = None, quantity: int = 0, size_list: list = None, user: int = 0):
     menu = InlineKeyboardMarkup(row_width=3)
+    qr_scanned = True
     if dish is not None:
         if length != 1:
             if dish > 0:
